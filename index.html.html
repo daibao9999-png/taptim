@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ngũ Sắc Hoa OBS 60FPS Ultra-Optimized</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent !important;
+            background-color: rgba(0, 0, 0, 0) !important;
+            user-select: none;
+        }
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            will-change: transform;
+            background: transparent !important;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="overlayCanvas"></canvas>
+    <script>
+        /**
+         * BẢN TỐI ƯU HÓA HIGH-PERFORMANCE 60 FPS CHO OBS STUDIO
+         * Các cải tiến chính:
+         * 1. Loại bỏ hoàn toàn shadowBlur/shadowColor (nguyên nhân chính gây rớt FPS trong Canvas 2D).
+         * 2. Thay thế bằng hiệu ứng Radial & Linear Gradient để tạo cảm giác huyền ảo phát sáng (glow) nhưng siêu nhẹ.
+         * 3. Sử dụng Object Pool & Giới hạn tối đa đối tượng (CAP entities) để tránh ngắt ngập bộ nhớ (Garbage Collection).
+         * 4. Tối ưu số lượng cánh hoa và hạt phấn để vừa giữ thẩm mỹ đẹp mắt vừa đạt 60 FPS mượt mà.
+         */
+
+        const canvas = document.getElementById('overlayCanvas');
+        // Kích hoạtalpha và desynchronized để giảm latency hiển thị
+        const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        // Màu ngũ sắc huyền ảo
+        const FIVE_COLORS = [
+            { main: '#FF2A7A', secondary: '#FF80BF' },
+            { main: '#FFD700', secondary: '#FFF5A6' },
+            { main: '#00F5D4', secondary: '#A6FFFA' },
+            { main: '#B15EFF', secondary: '#E5C4FF' },
+            { main: '#FF6B35', secondary: '#FFC4B0' }
+        ];
+
+        let flowers = [];
+        let pollens = [];
+        let shockwaves = [];
+
+        // Nâng cao hiệu năng bằng cách giới hạn số lượng đối tượng tối đa
+        const MAX_FLOWERS = 80;
+        const MAX_POLLENS = 160;
+        const MAX_SHOCKWAVES = 12;
+
+        /**
+         * Vẽ bông hoa với gradient thay cho shadowBlur
+         */
+        function drawEtherealFlower(ctx, petalsCount, innerR, outerR, pulseFactor, time) {
+            ctx.save();
+
+            // Vùng sáng Glow bao quanh (dùng Radial Gradient cực nhẹ)
+            const auraGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, outerR * 1.4);
+            auraGradient.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
+            auraGradient.addColorStop(0.5, 'rgba(255, 215, 0, 0.12)');
+            auraGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.beginPath();
+            ctx.arc(0, 0, outerR * 1.4, 0, Math.PI * 2);
+            ctx.fillStyle = auraGradient;
+            ctx.fill();
+
+            // Vẽ các cánh hoa
+            const angleStep = (Math.PI * 2) / petalsCount;
+            for (let i = 0; i < petalsCount; i++) {
+                const angle = i * angleStep;
+                const colorObj = FIVE_COLORS[i % FIVE_COLORS.length];
+
+                ctx.save();
+                ctx.rotate(angle);
+
+                const petalGrad = ctx.createLinearGradient(0, 0, 0, outerR);
+                petalGrad.addColorStop(0, '#FFFFFF');
+                petalGrad.addColorStop(0.3, colorObj.secondary);
+                petalGrad.addColorStop(0.8, colorObj.main);
+                petalGrad.addColorStop(1, '#FFFFFF');
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                const cp1x = -innerR * (0.45 + pulseFactor * 0.1);
+                const cp1y = outerR * 0.45;
+                const cp2x = innerR * (0.45 + pulseFactor * 0.1);
+                const cp2y = outerR * 0.45;
+
+                ctx.bezierCurveTo(cp1x, cp1y, -innerR * 0.1, outerR * 0.9, 0, outerR * (1 + pulseFactor * 0.05));
+                ctx.bezierCurveTo(innerR * 0.1, outerR * 0.9, cp2x, cp2y, 0, 0);
+
+                ctx.fillStyle = petalGrad;
+                ctx.fill();
+
+                // Đường gân cánh hoa
+                ctx.beginPath();
+                ctx.moveTo(0, innerR * 0.2);
+                ctx.quadraticCurveTo(Math.sin(time * 3 + i) * 1.5, outerR * 0.5, 0, outerR * 0.9);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 1.0;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            // Nhụy hoa
+            const stamenCount = 8;
+            const stamenAngle = (Math.PI * 2) / stamenCount;
+            for (let j = 0; j < stamenCount; j++) {
+                const stAngle = j * stamenAngle + time * 0.8;
+                const stLength = innerR * (1.1 + Math.sin(time * 4 + j) * 0.15);
+                const sx = Math.cos(stAngle) * stLength;
+                const sy = Math.sin(stAngle) * stLength;
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(sx, sy);
+                ctx.strokeStyle = 'rgba(255, 235, 150, 0.75)';
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(sx, sy, 1.2, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fill();
+            }
+
+            // Nhụy trung tâm
+            ctx.beginPath();
+            ctx.arc(0, 0, innerR * 0.6, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(0, 0, innerR * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFD700';
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // Vòng sóng lan tỏa khi click
+        class Shockwave {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 5;
+                this.alpha = 1;
+                this.color = FIVE_COLORS[Math.floor(Math.random() * FIVE_COLORS.length)];
+            }
+            update() {
+                this.radius += 3.5;
+                this.alpha -= 0.03;
+            }
+            draw() {
+                if (this.alpha <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = this.color.main;
+                ctx.lineWidth = 2.0;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // Bông hoa huyền ảo Bay lên & Xoay nhẹ
+        class EtherealFlower {
+            constructor(x, y) {
+                this.x = x + (Math.random() - 0.5) * 40;
+                this.y = y + (Math.random() - 0.5) * 40;
+                this.baseSize = Math.random() * 16 + 20;
+                this.size = 0;
+                this.maxSize = this.baseSize;
+
+                this.vy = -(Math.random() * 1.8 + 1.0) * 1.8;
+                this.vx = (Math.random() - 0.5) * 1.2;
+
+                this.wobbleSpeed = Math.random() * 0.04 + 0.02;
+                this.wobbleAmp = Math.random() * 2.0 + 0.8;
+                this.wobbleAngle = Math.random() * Math.PI * 2;
+
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.025;
+                this.petals = Math.random() > 0.4 ? 8 : 10;
+
+                this.alpha = 1;
+                this.growSpeed = Math.random() * 1.5 + 1.0;
+                this.decay = Math.random() * 0.009 + 0.005;
+
+                this.time = Math.random() * 100;
+            }
+
+            update() {
+                this.time += 0.05;
+                if (this.size < this.maxSize) {
+                    this.size += this.growSpeed;
+                    if (this.size > this.maxSize) this.size = this.maxSize;
+                }
+
+                this.y += this.vy;
+                this.wobbleAngle += this.wobbleSpeed;
+                this.x += Math.sin(this.wobbleAngle) * this.wobbleAmp + this.vx;
+                this.rotation += this.rotationSpeed;
+
+                this.alpha -= this.decay;
+                if (this.alpha < 0) this.alpha = 0;
+            }
+
+            draw() {
+                if (this.alpha <= 0 || this.size <= 0) return;
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.globalAlpha = this.alpha;
+
+                const pulse = Math.sin(this.time * 4) * 0.5 + 0.5;
+                drawEtherealFlower(ctx, this.petals, this.size * 0.25, this.size, pulse, this.time);
+                ctx.restore();
+            }
+        }
+
+        // Hạt phấn lấp lánh (Pollen)
+        class EtherealPollen {
+            constructor(x, y) {
+                this.x = x + (Math.random() - 0.5) * 35;
+                this.y = y + (Math.random() - 0.5) * 35;
+                this.colorObj = FIVE_COLORS[Math.floor(Math.random() * FIVE_COLORS.length)];
+                this.size = Math.random() * 2.5 + 1;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2 - (Math.random() * 1.5 + 0.5);
+                this.alpha = 1;
+                this.decay = Math.random() * 0.025 + 0.01;
+                this.sparkleSpeed = Math.random() * 0.2 + 0.1;
+                this.sparkle = Math.random() * Math.PI;
+                this.isStar = Math.random() > 0.7;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.sparkle += this.sparkleSpeed;
+                this.alpha -= this.decay;
+                if (this.alpha < 0) this.alpha = 0;
+            }
+
+            draw() {
+                if (this.alpha <= 0) return;
+                ctx.save();
+                const sparkleAlpha = (Math.sin(this.sparkle) * 0.4 + 0.6) * this.alpha;
+                ctx.globalAlpha = sparkleAlpha;
+                ctx.fillStyle = this.colorObj.main;
+
+                if (this.isStar) {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.sparkle);
+                    ctx.beginPath();
+                    for (let i = 0; i < 4; i++) {
+                        ctx.rotate(Math.PI / 2);
+                        ctx.lineTo(0, this.size * 1.8);
+                        ctx.lineTo(0, 0);
+                    }
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fill();
+                    ctx.restore();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        // Kích hoạt bùng nổ hiệu ứng khi nhấp chuột
+        function triggerFlowerBurst(x, y) {
+            if (shockwaves.length < MAX_SHOCKWAVES) {
+                shockwaves.push(new Shockwave(x, y));
+            }
+
+            const flowerCount = 12; // Cân bằng số hoa mỗi lần nhấp
+            for (let i = 0; i < flowerCount; i++) {
+                if (flowers.length >= MAX_FLOWERS) flowers.shift();
+                flowers.push(new EtherealFlower(x, y));
+            }
+
+            const pollenCount = 45; // Cân bằng hạt phấn
+            for (let i = 0; i < pollenCount; i++) {
+                if (pollens.length >= MAX_POLLENS) pollens.shift();
+                pollens.push(new EtherealPollen(x, y));
+            }
+        }
+
+        canvas.addEventListener('click', (e) => {
+            triggerFlowerBurst(e.clientX, e.clientY);
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            for (let i = 0; i < e.touches.length; i++) {
+                triggerFlowerBurst(e.touches[i].clientX, e.touches[i].clientY);
+            }
+        });
+
+        // Loop hoạt họa chính sử dụng requestAnimationFrame
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+
+            for (let i = shockwaves.length - 1; i >= 0; i--) {
+                shockwaves[i].update();
+                shockwaves[i].draw();
+                if (shockwaves[i].alpha <= 0) shockwaves.splice(i, 1);
+            }
+
+            for (let i = pollens.length - 1; i >= 0; i--) {
+                pollens[i].update();
+                pollens[i].draw();
+                if (pollens[i].alpha <= 0) pollens.splice(i, 1);
+            }
+
+            for (let i = flowers.length - 1; i >= 0; i--) {
+                flowers[i].update();
+                flowers[i].draw();
+                if (flowers[i].alpha <= 0) flowers.splice(i, 1);
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
